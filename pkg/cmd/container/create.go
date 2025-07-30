@@ -39,6 +39,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/log"
 
+	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/nerdctl/v2/pkg/annotations"
 	"github.com/containerd/nerdctl/v2/pkg/api/types"
 	"github.com/containerd/nerdctl/v2/pkg/clientutil"
@@ -178,6 +179,7 @@ func Create(ctx context.Context, client *containerd.Client, args []string, netMa
 		options.ImagePullOpt.Mode = options.Pull
 		options.ImagePullOpt.OCISpecPlatform = ocispecPlatforms
 		options.ImagePullOpt.Unpack = nil
+		options.ImagePullOpt.GOptions.Snapshotter="devbox" // snapshotter
 
 		ensuredImage, err = image.EnsureImage(ctx, client, rawRef, options.ImagePullOpt)
 		if err != nil {
@@ -226,8 +228,13 @@ func Create(ctx context.Context, client *containerd.Client, args []string, netMa
 	} else {
 		if !options.Rootfs {
 			// UserNS not set and its a normal image
-			cOpts = append(cOpts, containerd.WithNewSnapshot(id, ensuredImage.Image))
-		}
+			var snapshotOpts []snapshots.Opt
+			if len(options.SnapshotLabels) > 0 {
+				snapshotOpts = append(snapshotOpts, snapshots.WithLabels(options.SnapshotLabels))
+			}
+			// 指定snapshotter和snapshot label
+			cOpts = append(cOpts, containerd.WithNewSnapshot(id, ensuredImage.Image, snapshotOpts...))
+			}
 	}
 
 	if options.Workdir != "" {
