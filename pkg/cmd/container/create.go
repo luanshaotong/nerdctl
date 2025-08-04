@@ -74,6 +74,7 @@ func Create(ctx context.Context, client *containerd.Client, args []string, netMa
 	// Acquire an exclusive lock on the volume store until we are done to avoid being raced by any other
 	// volume operations (or any other operation involving volume manipulation)
 	volStore, err := volume.Store(options.GOptions.Namespace, options.GOptions.DataRoot, options.GOptions.Address)
+	fmt.Println("options.GOptions.DataRoot: ", options.GOptions.DataRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,7 +234,7 @@ func Create(ctx context.Context, client *containerd.Client, args []string, netMa
 			}
 			// 指定snapshotter和snapshot label
 			cOpts = append(cOpts, containerd.WithNewSnapshot(id, ensuredImage.Image, snapshotOpts...))
-			}
+		}
 	}
 
 	if options.Workdir != "" {

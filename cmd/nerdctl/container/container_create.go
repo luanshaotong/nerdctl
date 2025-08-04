@@ -19,6 +19,8 @@ package container
 import (
 	"fmt"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
@@ -28,6 +30,7 @@ import (
 	"github.com/containerd/nerdctl/v2/pkg/clientutil"
 	"github.com/containerd/nerdctl/v2/pkg/cmd/container"
 	"github.com/containerd/nerdctl/v2/pkg/containerutil"
+	ncdefaults "github.com/containerd/nerdctl/v2/pkg/defaults"
 )
 
 func CreateCommand() *cobra.Command {
@@ -524,6 +527,76 @@ func createOptions(cmd *cobra.Command) (types.ContainerCreateOptions, error) {
 	return opt, nil
 }
 
+const (
+	DefaultNamespace           = "sealos.io"
+	DefaultContainerdAddress   = "unix:///var/run/containerd/containerd.sock"
+	DefaultDataRoot            = "/var/lib/containerd"
+	DefaultRuntime             = "io.containerd.runc.v2"
+	DefaultSnapshotter         = "devbox"
+	DefaultNetworkMode         = "none"
+	InsecureRegistry           = true
+	PauseContainerDuringCommit = false
+
+	AnnotationKeyNamespace               = "namespace"
+	AnnotationKeyImageName               = "image.name"
+	DevboxOptionsRemoveBaseImageTopLayer = true
+	AnnotationImageFromValue             = "true"
+	AnnotationUseLimitValue              = "1Gi"
+
+	SnapshotLabelPrefix  = "containerd.io/snapshot/devbox-"
+	ContainerLabelPrefix = "devbox.sealos.io/"
+
+	DefaultMaxRetries = 3
+	DefaultRetryDelay = 5 * time.Second
+)
+
+// NewGlobalOptionConfig new global option config
+func NewGlobalOptionConfig() *types.GlobalCommandOptions {
+	return &types.GlobalCommandOptions{
+		Namespace:        DefaultNamespace,
+		Address:          DefaultContainerdAddress,
+		DataRoot:         DefaultDataRoot,
+		Debug:            false,
+		DebugFull:        false,
+		Snapshotter:      DefaultSnapshotter,
+		CNIPath:          ncdefaults.CNIPath(),
+		CNINetConfPath:   ncdefaults.CNINetConfPath(),
+		CgroupManager:    ncdefaults.CgroupManager(),
+		InsecureRegistry: false,
+		HostsDir:         ncdefaults.HostsDirs(),
+		Experimental:     true,
+		HostGatewayIP:    ncdefaults.HostGatewayIP(),
+		KubeHideDupe:     false,
+		CDISpecDirs:      ncdefaults.CDISpecDirs(),
+		UsernsRemap:      "",
+		DNS:              []string{},
+		DNSOpts:          []string{},
+		DNSSearch:        []string{},
+	}
+}
+
+// convertLabels convert labels to "containerd.io/snapshot/devbox-" format
+func convertLabels(labels map[string]string) map[string]string {
+	convertedLabels := make(map[string]string)
+	for key, value := range labels {
+		if strings.HasPrefix(key, ContainerLabelPrefix) {
+			// convert "devbox.sealos.io/" to "containerd.io/snapshot/devbox-"
+			newKey := SnapshotLabelPrefix + key[len(ContainerLabelPrefix):]
+			convertedLabels[newKey] = value
+		}
+	}
+	return convertedLabels
+}
+
+// convertMapToSlice convert map to slice
+func convertMapToSlice(labels map[string]string) []string {
+	slice := make([]string, 0, len(labels))
+	for key, value := range labels {
+		slice = append(slice, fmt.Sprintf("%s=%s", key, value))
+	}
+	return slice
+}
+
 func createAction(cmd *cobra.Command, args []string) error {
 	createOpt, err := createOptions(cmd)
 	if err != nil {
@@ -539,14 +612,65 @@ func createAction(cmd *cobra.Command, args []string) error {
 	}
 	defer cancel()
 
-	netFlags, err := loadNetworkFlags(cmd, createOpt.GOptions)
+	global := NewGlobalOptionConfig()
+
+	netFlags, err := loadNetworkFlags(cmd, *global)
 	if err != nil {
 		return fmt.Errorf("failed to load networking flags: %w", err)
 	}
 
-	netManager, err := containerutil.NewNetworkingOptionsManager(createOpt.GOptions, netFlags, client)
+	netManager, err := containerutil.NewNetworkingOptionsManager(*global, netFlags, client)
 	if err != nil {
 		return err
+	}
+
+	// netManager, err := containerutil.NewNetworkingOptionsManager(createOpt.GOptions,
+	// 	types.NetworkOptions{
+	// 		NetworkSlice: []string{DefaultNetworkMode},
+	// 	}, client)
+
+	// Annotate the devbox pod with the devbox init
+	AnnotationInit := "devbox.sealos.io/init"
+	// Annotate the devbox pod with the storage limit
+	AnnotationStorageLimit := "devbox.sealos.io/storage-limit"
+	// Annotate the devbox pod with the devbox part of
+	AnnotationContentID := "devbox.sealos.io/content-id"
+
+	// create container with labels
+	originalAnnotations := map[string]string{
+		AnnotationContentID:    "abcdefgh",
+		AnnotationInit:         AnnotationImageFromValue,
+		AnnotationStorageLimit: AnnotationUseLimitValue,
+		// AnnotationKeyNamespace: DefaultNamespace,
+		// AnnotationKeyImageName: baseImage,
+	}
+
+	// convert labels to "containerd.io/snapshot/devbox-" format
+	convertedLabels := convertLabels(originalAnnotations)
+	convertedAnnotations := convertMapToSlice(originalAnnotations)
+
+	// create container options
+	createOpt = types.ContainerCreateOptions{
+		GOptions:       *global,
+		Runtime:        DefaultRuntime, // user devbox runtime
+		Name:           fmt.Sprintf("devbox-container-%d", time.Now().Unix()),
+		Pull:           "missing",
+		InRun:          false, // not start container
+		Rm:             false,
+		LogDriver:      "json-file",
+		StopSignal:     "SIGTERM",
+		Restart:        "unless-stopped",
+		Interactive:    false,  // not interactive, avoid conflict with Detach
+		Cgroupns:       "host", // add cgroupns mode
+		Detach:         true,   // run in background
+		Rootfs:         false,
+		Label:          convertedAnnotations,
+		SnapshotLabels: convertedLabels,
+		ImagePullOpt: types.ImagePullOptions{
+			GOptions: types.GlobalCommandOptions{
+				Snapshotter: DefaultSnapshotter,
+			},
+		},
 	}
 
 	c, gc, err := container.Create(ctx, client, args, netManager, createOpt)
@@ -563,6 +687,7 @@ func createAction(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	fmt.Fprintln(createOpt.Stdout, c.ID())
+	// fmt.Fprintln(createOpt.Stdout, c.ID())
+	fmt.Println(c.ID())
 	return nil
 }
