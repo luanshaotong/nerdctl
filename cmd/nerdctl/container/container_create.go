@@ -19,6 +19,7 @@ package container
 import (
 	"fmt"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
@@ -417,6 +418,23 @@ func createOptions(cmd *cobra.Command) (types.ContainerCreateOptions, error) {
 	if err != nil {
 		return opt, err
 	}
+
+	// Parse snapshot labels
+	snapshotLabels, err := cmd.Flags().GetStringArray("snapshot-label")
+	if err != nil {
+		return opt, err
+	}
+	if len(snapshotLabels) > 0 {
+		opt.SnapshotLabels = make(map[string]string)
+		for _, label := range snapshotLabels {
+			if key, value, ok := strings.Cut(label, "="); ok {
+				opt.SnapshotLabels[key] = value
+			} else {
+				opt.SnapshotLabels[label] = ""
+			}
+		}
+	}
+
 	opt.Annotations, err = cmd.Flags().GetStringArray("annotation")
 	if err != nil {
 		return opt, err
