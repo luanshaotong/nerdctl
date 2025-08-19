@@ -40,7 +40,6 @@ import (
 	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/cio"
-	"github.com/containerd/containerd/v2/pkg/rootfs"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/containerd/platforms"
@@ -275,7 +274,7 @@ func generateCommitImageConfig(ctx context.Context, container containerd.Contain
 	}
 	log.G(ctx).Debugf("generateCommitImageConfig(): arch=%q, os=%q", arch, os)
 	// remove last diiffID
-	if opts.DevboxOptions.RemoveBaseImageTopLayer && len(baseConfig.RootFS.DiffIDs) > 0 {
+	if opts.DevboxOptions.RemoveBaseImageTopLayer && len(baseConfig.RootFS.DiffIDs) > 1 {
 		baseConfig.RootFS.DiffIDs = baseConfig.RootFS.DiffIDs[:len(baseConfig.RootFS.DiffIDs)-1]
 		baseConfig.History = baseConfig.History[:len(baseConfig.History)-1]
 	}
@@ -336,7 +335,7 @@ func writeContentsForImage(ctx context.Context, snName string, baseImg container
 		return ocispec.Descriptor{}, emptyDigest, err
 	}
 	// remove last layer
-	if opts.DevboxOptions.RemoveBaseImageTopLayer && len(baseMfst.Layers) > 0 {
+	if opts.DevboxOptions.RemoveBaseImageTopLayer && len(baseMfst.Layers) > 1 {
 		baseMfst.Layers = baseMfst.Layers[:len(baseMfst.Layers)-1]
 	}
 	layers := append(baseMfst.Layers, diffLayerDesc)
@@ -430,7 +429,7 @@ func createDiff(ctx context.Context, name string, sn snapshots.Snapshotter, cs c
 		}
 	}
 
-	newDesc, err := rootfs.CreateDiff(ctx, name, sn, comparer, diffOpts...)
+	newDesc, err := CreateDiff(ctx, name, sn, comparer, opts.DevboxOptions.RemoveBaseImageTopLayer, diffOpts...)
 	if err != nil {
 		return ocispec.Descriptor{}, digest.Digest(""), err
 	}
