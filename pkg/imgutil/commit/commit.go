@@ -198,7 +198,7 @@ func Commit(ctx context.Context, client *containerd.Client, container containerd
 	}
 
 	rootfsID := identity.ChainID(imageConfig.RootFS.DiffIDs).String()
-	if err := applyDiffLayer(ctx, rootfsID, baseImgConfig, sn, differ, diffLayerDesc); err != nil {
+	if err := applyDiffLayer(ctx, rootfsID, baseImgConfig, sn, differ, diffLayerDesc, opts.DevboxOptions.RemoveBaseImageTopLayer); err != nil {
 		return emptyDigest, fmt.Errorf("failed to apply diff: %w", err)
 	}
 
@@ -539,11 +539,19 @@ func createDiff(ctx context.Context, name string, sn snapshots.Snapshotter, cs c
 }
 
 // applyDiffLayer will apply diff layer content created by createDiff into the snapshotter.
-func applyDiffLayer(ctx context.Context, name string, baseImg ocispec.Image, sn snapshots.Snapshotter, differ diff.Applier, diffDesc ocispec.Descriptor) (retErr error) {
+func applyDiffLayer(ctx context.Context, name string, baseImg ocispec.Image, sn snapshots.Snapshotter, differ diff.Applier, diffDesc ocispec.Descriptor, removeTopLayer bool) (retErr error) {
 	var (
 		key    = uniquePart() + "-" + name
 		parent = identity.ChainID(baseImg.RootFS.DiffIDs).String()
 	)
+
+	if removeTopLayer {
+		info, err := sn.Stat(ctx, parent)
+		if err != nil {
+			return err
+		}
+		parent = info.Parent
+	}
 
 	mount, err := sn.Prepare(ctx, key, parent)
 	if err != nil {
