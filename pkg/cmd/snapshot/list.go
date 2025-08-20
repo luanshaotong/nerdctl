@@ -31,12 +31,13 @@ import (
 
 // SnapshotListItem represents a snapshot in the list
 type SnapshotListItem struct {
-	Name        string         `json:"name"`
-	Parent      string         `json:"parent,omitempty"`
-	Kind        snapshots.Kind `json:"kind"`
-	Created     time.Time      `json:"created"`
-	Updated     time.Time      `json:"updated"`
-	Snapshotter string         `json:"snapshotter"`
+	Name        string            `json:"name"`
+	Parent      string            `json:"parent,omitempty"`
+	Kind        snapshots.Kind    `json:"kind"`
+	Created     time.Time         `json:"created"`
+	Updated     time.Time         `json:"updated"`
+	Snapshotter string            `json:"snapshotter"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 // List retrieves a list of snapshots
@@ -61,6 +62,7 @@ func List(ctx context.Context, client *containerd.Client, options types.Snapshot
 			Created:     info.Created,
 			Updated:     info.Updated,
 			Snapshotter: snapshotterName,
+			Labels:      info.Labels,
 		})
 		return nil
 	})
